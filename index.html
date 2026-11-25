@@ -7,6 +7,10 @@
 <meta name="referrer" content="no-referrer">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="REDLINE">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
 <title>REDLINE Messenger</title>
 <style>
 :root{color-scheme:dark;--bg:#0e1621;--panel:#17212b;--panel2:#242f3d;--sel:#2b5278;--hover:#202b36;--line:#0b121a;--text:#f5f5f5;--muted:#708499;--accent:#6ab3f3;--blue:#5288c1;--green:#4fae4e;--red:#e5546a;--in:#182533;--out:#2b5278;--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px)}
@@ -295,7 +299,7 @@ details.net summary{color:var(--muted);font-size:13px;cursor:pointer;padding:4px
   const NTFY_URL = 'https://ntfy.sh';   // поставьте '' чтобы отключить
   // Push-сервер Cloudflare Worker. Вставьте публичный VAPID-ключ после его генерации.
   const PUSH_SERVER_URL = 'https://chatt.nitrof170.workers.dev';
-  const VAPID_PUBLIC_KEY = 'BA7iVBjch5XUY6RQ0SOiHruCzoOpek6HI9Uc5IbV_jmbOeQZu2osZ6u1Yv-8xDnp0XJZpnXUeTBIITiEnnGgzSo';
+  const VAPID_PUBLIC_KEY = 'BI6e-mCnzPqrAOL0S5jzFvhkvZ9y7qTHuRxBaoLPQUrOfomNmXnX-BLpQOLReI9LJL3bPHtRZoyxNRAhcViafFo';
 
   // Серверы для звонков. STUN есть всегда; для надёжной связи в любых сетях добавьте TURN:
   const ICE_SERVERS = [
@@ -1411,11 +1415,14 @@ details.net summary{color:var(--muted);font-size:13px;cursor:pointer;padding:4px
   // =================== УВЕДОМЛЕНИЯ ===================
   let actx=null, notifyInit=null;
   const notifySupported=()=>!!(window.isSecureContext && 'Notification' in window);
+  const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  const isStandalone=()=>!!(navigator.standalone||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches));
+  const iosNeedsInstall=()=>isIOS&&!isStandalone();
   function updateNotifyButton(){
     const b=$('notifyBtn'); if(!b) return;
     if(!notifySupported()){
-      b.disabled=true;
-      b.textContent='🔕 Уведомления требуют HTTPS';
+      b.disabled=false;
+      b.textContent=iosNeedsInstall()?'📲 Установи на экран «Домой»':'🔕 Уведомления недоступны';
       return;
     }
     const p=Notification.permission;
@@ -1434,7 +1441,7 @@ details.net summary{color:var(--muted);font-size:13px;cursor:pointer;padding:4px
   }
   const NotificationSafeGranted=()=>notifySupported() && Notification.permission==='granted';
   const pushB64u = {
-    enc(bytes){ let s=''; for(const b of bytes) s+=String.fromCharCode(b); return btoa(s).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,''); },
+    enc(bytes){ let s=''; for(const b of bytes) s+=String.fromCharCode(b); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); },
     dec(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4)s+='='; return Uint8Array.from(atob(s),c=>c.charCodeAt(0)); }
   };
   function pushConfigReady(){
@@ -1446,19 +1453,39 @@ details.net summary{color:var(--muted);font-size:13px;cursor:pointer;padding:4px
     const bytes=new TextEncoder().encode('redline-push-v1:'+code);
     return pushB64u.enc(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)));
   }
+  const sameKey=(a,b)=>{ if(!a||!b) return false; const x=new Uint8Array(a), y=new Uint8Array(b); if(x.length!==y.length) return false; for(let i=0;i<x.length;i++) if(x[i]!==y[i]) return false; return true; };
+  async function getPushSubscription(reg){
+    const key=pushB64u.dec(VAPID_PUBLIC_KEY);
+    let sub=await reg.pushManager.getSubscription();
+    // Подписка, созданная со старым VAPID-ключом, не примет пуши от сервера — пересоздаём её.
+    if(sub && sub.options && sub.options.applicationServerKey && !sameKey(sub.options.applicationServerKey,key)){
+      try{ await sub.unsubscribe(); }catch(e){}
+      sub=null;
+    }
+    if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+    return sub;
+  }
   async function ensureChatPushSubscription(chat){
-    if(!chat || !notifySupported() || Notification.permission!=='granted' || !pushConfigReady()) return;
+    if(!chat || !notifySupported() || Notification.permission!=='granted' || !pushConfigReady()) return false;
     try{
       const reg=await registerNotifyWorker();
-      if(!reg || !reg.pushManager) return;
-      let sub=await reg.pushManager.getSubscription();
-      if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:pushB64u.dec(VAPID_PUBLIC_KEY)});
+      if(!reg || !reg.pushManager) return false;
+      const sub=await getPushSubscription(reg);
       const roomToken=await pushRoomToken(chat.code);
-      await fetch(PUSH_SERVER_URL+'/api/subscribe',{
+      const r=await fetch(PUSH_SERVER_URL+'/api/subscribe',{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({chatId:chat.id,roomToken,subscription:sub.toJSON()})
       });
-    }catch(e){ console.warn('REDLINE push subscribe:',e); }
+      if(!r.ok){ console.warn('REDLINE push subscribe: сервер ответил',r.status); return false; }
+      return true;
+    }catch(e){ console.warn('REDLINE push subscribe:',e); return false; }
+  }
+  async function sendTestPush(){
+    const reg=await registerNotifyWorker();
+    if(!reg || !reg.pushManager) return {ok:false,error:'Service Worker не запущен'};
+    const sub=await getPushSubscription(reg);
+    const r=await fetch(PUSH_SERVER_URL+'/api/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:sub.toJSON()})});
+    return r.json();
   }
   async function pushChatPeers(chat){
     if(!chat || !pushConfigReady()) return;
@@ -1470,10 +1497,11 @@ details.net summary{color:var(--muted);font-size:13px;cursor:pointer;padding:4px
         if(sub) senderEndpoint=sub.endpoint;
       }
       const roomToken=await pushRoomToken(chat.code);
-      await fetch(PUSH_SERVER_URL+'/api/notify',{
+      const r=await fetch(PUSH_SERVER_URL+'/api/notify',{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({chatId:chat.id,roomToken,senderEndpoint})
       });
+      try{ const j=await r.json(); if(!r.ok||(j.results||[]).some(x=>x.status>=300)) console.warn('REDLINE push notify:',r.status,JSON.stringify(j)); }catch(_){}
     }catch(e){ console.warn('REDLINE push notify:',e); }
   }
   function notificationBody(m){
@@ -1538,7 +1566,7 @@ details.net summary{color:var(--muted);font-size:13px;cursor:pointer;padding:4px
   userInput.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); saveProfile().then(ok=>{ if(ok) userInput.blur(); }); } });
   $('profileSave').addEventListener('click',()=>saveProfile());
   $('notifyBtn').addEventListener('click',async()=>{
-    if(!notifySupported()){say('Для уведомлений открой REDLINE по HTTPS в поддерживаемом браузере.');updateNotifyButton();return;}
+    if(!notifySupported()){say(iosNeedsInstall()?'На iPhone уведомления работают только в приложении с экрана «Домой»: Safari → Поделиться → «На экран Домой», потом открой REDLINE с иконки и нажми эту кнопку.':'Уведомления недоступны: нужен HTTPS и современный браузер.');updateNotifyButton();return;}
     if(Notification.permission==='denied'){say('Уведомления заблокированы. Разреши их в настройках сайта в браузере.');updateNotifyButton();return;}
     let p;
     try{p=await Notification.requestPermission();}
@@ -1546,9 +1574,15 @@ details.net summary{color:var(--muted);font-size:13px;cursor:pointer;padding:4px
     updateNotifyButton();
     if(p==='granted'){
       const reg=await registerNotifyWorker();
-      if(reg && pushConfigReady()) for(const c of chats.values()) ensureChatPushSubscription(c);
-      say(reg?'Уведомления включены.':'Разрешение включено, но Service Worker не запустился. Проверь, что redline-sw.js лежит рядом с HTML-файлом.');
-      if(reg && !pushConfigReady()) say('Локальные уведомления включены. Для Push при закрытом приложении нужно вставить VAPID public key.');
+      if(!reg){ say('Разрешение включено, но Service Worker не запустился. Проверь, что redline-sw.js лежит рядом с index.html.'); return; }
+      if(!pushConfigReady()){ say('Локальные уведомления включены. Для Push при закрытом приложении нужен VAPID public key.'); return; }
+      say('Подключаю push-уведомления…');
+      for(const c of chats.values()) await ensureChatPushSubscription(c);
+      try{
+        const t=await sendTestPush();
+        if(t && t.ok) say('Готово! Тебе отправлено тестовое уведомление. Закрой приложение — пуши будут приходить и при закрытом.');
+        else say('Push не прошёл: '+((t&&t.push&&(t.push.status+' '+(t.push.reason||'')))||(t&&t.error)||'неизвестная ошибка'));
+      }catch(e){ say('Не удалось связаться с push-сервером: '+(e&&e.message||e)); }
     }else say('Разрешение на уведомления не выдано.');
   });
   $('profileCopy').addEventListener('click',()=>{ if(myHandle) copy('@'+myHandle,'Скопировано: @'+myHandle); });
