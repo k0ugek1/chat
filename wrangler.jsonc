@@ -1,14 +1,8 @@
-
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "chatt",
   "main": "src/index.js",
   "compatibility_date": "2026-11-25",
-  "assets": {
-    "directory": ".",
-    "binding": "ASSETS",
-    "run_worker_first": ["/api/*", "/health"]
-  },
   "kv_namespaces": [
     {
       "binding": "PUSH_KV",
@@ -17,7 +11,7 @@
   ],
   "vars": {
     "ALLOWED_ORIGIN": "https://k0ugek1.github.io",
-    "VAPID_PUBLIC_KEY": "BA7iVBjch5XUY6RQ0SOiHruCzoOpek6HI9Uc5IbV_jmbOeQZu2osZ6u1Yv-8xDnp0XJZpnXUeTBIITiEnnGgzSo",
+    "VAPID_PUBLIC_KEY": "BI6e-mCnzPqrAOL0S5jzFvhkvZ9y7qTHuRxBaoLPQUrOfomNmXnX-BLpQOLReI9LJL3bPHtRZoyxNRAhcViafFo",
     "VAPID_SUBJECT": "mailto:nitrof170@gmail.com"
   }
 }
