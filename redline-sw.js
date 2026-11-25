@@ -1,4 +1,4 @@
-
+// REDLINE service worker: принимает Web Push и показывает уведомление, даже когда приложение закрыто.
 self.addEventListener('install', event => {
   event.waitUntil(self.skipWaiting());
 });
@@ -14,13 +14,11 @@ self.addEventListener('push', event => {
   } catch (_) {}
 
   const title = String(data.title || 'REDLINE').slice(0, 60);
-  const body = String(
-    data.body || 'Новое сообщение. Открой REDLINE.'
-  ).slice(0, 120);
-
+  const body = String(data.body || 'Новое сообщение. Открой REDLINE.').slice(0, 120);
   const chatId = String(data.chatId || '');
   const target = String(data.url || self.registration.scope);
 
+  // Safari/iOS требует показать уведомление на КАЖДЫЙ push, иначе подписка отзывается.
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
@@ -34,28 +32,26 @@ self.addEventListener('push', event => {
 self.addEventListener('notificationclick', event => {
   const data = event.notification.data || {};
   const chatId = data.chatId || '';
-  const target = data.url || self.registration.scope;
 
   event.notification.close();
 
   event.waitUntil((async () => {
-    const windows = await self.clients.matchAll({
-      type: 'window',
-      includeUncontrolled: true
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const own = windows.filter(c => {
+      try { return new URL(c.url).origin === self.location.origin; } catch (_) { return false; }
     });
 
-    const url = new URL(target, self.registration.scope);
-    if (chatId) {
-      url.searchParams.set('openChat', chatId);
+    // Приложение уже запущено: просто выводим его на экран и открываем нужный чат (без перезагрузки).
+    if (own.length) {
+      const client = own.find(c => c.focused) || own[0];
+      try { await client.focus(); } catch (_) {}
+      if (chatId) client.postMessage({ type: 'REDLINE_OPEN_CHAT', chatId });
+      return;
     }
 
-    for (const client of windows) {
-      if (new URL(client.url).origin === self.location.origin) {
-        const navigated = await client.navigate(url.href);
-        return (navigated || client).focus();
-      }
-    }
-
+    // Приложение закрыто: запускаем его сразу в нужном чате.
+    const url = new URL(data.url || self.registration.scope, self.registration.scope);
+    if (chatId) url.searchParams.set('openChat', chatId);
     return self.clients.openWindow(url.href);
   })());
 });
