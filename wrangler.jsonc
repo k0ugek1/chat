@@ -17,7 +17,7 @@
   ],
   "vars": {
     "ALLOWED_ORIGIN": "https://k0ugek1.github.io",
-    "VAPID_PUBLIC_KEY": "PASTE_VAPID_PUBLIC_KEY_HERE",
-    "VAPID_SUBJECT": "mailto:admin@example.com"
+    "VAPID_PUBLIC_KEY": "BA7iVBjch5XUY6RQ0SOiHruCzoOpek6HI9Uc5IbV_jmbOeQZu2osZ6u1Yv-8xDnp0XJZpnXUeTBIITiEnnGgzSo",
+    "VAPID_SUBJECT": "mailto:nitrof170@gmail.com"
   }
 }
